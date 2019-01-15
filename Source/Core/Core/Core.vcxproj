@@ -35,6 +35,16 @@
     <Import Project="..\..\VSProps\PCHUse.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ExternalsDir)SlippiLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ExternalsDir)SlippiLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ActionReplay.cpp" />
     <ClCompile Include="Analytics.cpp" />
@@ -144,6 +154,7 @@
     <ClCompile Include="HW\EXI\EXI_DeviceIPL.cpp" />
     <ClCompile Include="HW\EXI\EXI_DeviceMemoryCard.cpp" />
     <ClCompile Include="HW\EXI\EXI_DeviceMic.cpp" />
+    <ClCompile Include="HW\EXI\EXI_DeviceSlippi.cpp" />
     <ClCompile Include="HW\GCKeyboard.cpp" />
     <ClCompile Include="HW\GCKeyboardEmu.cpp" />
     <ClCompile Include="HW\GCMemcard\GCMemcard.cpp" />
@@ -294,6 +305,7 @@
     <ClCompile Include="PowerPC\SignatureDB\DSYSignatureDB.cpp" />
     <ClCompile Include="PowerPC\SignatureDB\MEGASignatureDB.cpp" />
     <ClCompile Include="PowerPC\SignatureDB\SignatureDB.cpp" />
+    <ClCompile Include="Slippi\SlippiReplayComm.cpp" />
     <ClCompile Include="State.cpp" />
     <ClCompile Include="SysConf.cpp" />
     <ClCompile Include="TitleDatabase.cpp" />
@@ -402,6 +414,7 @@
     <ClInclude Include="HW\EXI\EXI_DeviceIPL.h" />
     <ClInclude Include="HW\EXI\EXI_DeviceMemoryCard.h" />
     <ClInclude Include="HW\EXI\EXI_DeviceMic.h" />
+    <ClInclude Include="HW\EXI\EXI_DeviceSlippi.h" />
     <ClInclude Include="HW\GCKeyboard.h" />
     <ClInclude Include="HW\GCKeyboardEmu.h" />
     <ClInclude Include="HW\GCMemcard\GCMemcard.h" />
@@ -541,6 +554,7 @@
     <ClInclude Include="PowerPC\PPCSymbolDB.h" />
     <ClInclude Include="PowerPC\PPCTables.h" />
     <ClInclude Include="PowerPC\Profiler.h" />
+    <ClInclude Include="Slippi\SlippiReplayComm.h" />
     <ClInclude Include="State.h" />
     <ClInclude Include="SysConf.h" />
     <ClInclude Include="Titles.h" />
@@ -599,6 +613,9 @@
     </ProjectReference>
     <ProjectReference Include="$(ExternalsDir)minizip\minizip.vcxproj">
       <Project>{23114507-079a-4418-9707-cfa81a03ca99}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Externals\SlippiLib\SlippiLib.vcxproj">
+      <Project>{ff39260b-839a-4a6c-a117-caa73c1683f5}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

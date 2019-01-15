@@ -517,6 +517,9 @@ add_subdirectory(Externals/cpp-optparse)
 add_subdirectory(Externals/glslang)
 add_subdirectory(Externals/imgui)
 
+add_subdirectory(Externals/SlippiLib)
+include_directories(Externals/SlippiLib)
+
 find_package(pugixml)
 if(NOT pugixml_FOUND)
   message(STATUS "Using static pugixml from Externals")
