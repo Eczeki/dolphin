@@ -105,6 +105,7 @@ add_library(core
   HW/EXI/EXI_DeviceIPL.cpp
   HW/EXI/EXI_DeviceMemoryCard.cpp
   HW/EXI/EXI_DeviceMic.cpp
+  HW/EXI/EXI_DeviceSlippi.cpp
   HW/GCKeyboard.cpp
   HW/GCKeyboardEmu.cpp
   HW/GCMemcard/GCMemcard.cpp
@@ -221,6 +222,7 @@ add_library(core
   PowerPC/JitCommon/JitAsmCommon.cpp
   PowerPC/JitCommon/JitBase.cpp
   PowerPC/JitCommon/JitCache.cpp
+  Slippi/SlippiReplayComm.cpp
 )
 
 if(_M_X86)
@@ -293,6 +295,7 @@ PUBLIC
   videoogl
   videosoftware
   videovulkan
+  SlippiLib
 
 PRIVATE
   ${LZO}
