@@ -136,6 +136,18 @@ public:
 
   void AdjustPadBufferSize(unsigned int size);
 
+  // used for slippi, not the best place for it
+  inline int FindPlayerPad(const Player* player) const
+  {
+    for (int i = 0; i < 4; i++)
+    {
+      if (m_pad_map[i] == player->pid)
+        return i;
+    }
+
+    return -1;
+  }
+
 protected:
   struct AsyncQueueEntry
   {
@@ -254,4 +266,6 @@ private:
 
 void NetPlay_Enable(NetPlayClient* const np);
 void NetPlay_Disable();
+
+extern NetPlayClient* netplay_client;
 }  // namespace NetPlay
