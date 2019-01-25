@@ -434,6 +434,7 @@ namespace Slippi {
   }
 
   int32_t SlippiGame::GetFrameCount() {
+    processData();
     return game->frameCount;
   }
 

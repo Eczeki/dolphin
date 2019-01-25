@@ -596,12 +596,16 @@ void CEXISlippi::prepareFrameCount()
     return;
   }
 
+  int bufferCount = 10;
+
+  // Make sure we've loaded all the latest data, maybe this should be part of GetFrameCount
   auto latestFrame = m_current_game->GetFrameCount();
   auto frameCount = latestFrame - Slippi::GAME_FIRST_FRAME;
-  auto frameCountPlusBuffer = frameCount + 40;
+  auto frameCountPlusBuffer = frameCount + bufferCount;
 
   u8 result = frameCountPlusBuffer > 0xFF ? 0xFF : (u8)frameCountPlusBuffer;
-  WARN_LOG(EXPANSIONINTERFACE, "EXI_DeviceSlippi.cpp: Fast forwarding by %d frames.", result);
+  WARN_LOG(EXPANSIONINTERFACE, "EXI_DeviceSlippi.cpp: Fast forwarding by %d frames. (+%d)", result,
+           bufferCount);
 
   m_read_queue.push_back(result);
 }
