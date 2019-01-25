@@ -529,10 +529,10 @@ void CEXISlippi::prepareFrameData(u8* payload)
     return;
   }
 
-  //auto currentFrame = frameIndex;
-  //auto latestFrame = m_current_game->GetFrameCount();
-  //INFO_LOG(EXPANSIONINTERFACE, "[Frame %d] Playback current behind by: %d frames.", currentFrame,
-  //         latestFrame - currentFrame);
+  auto currentFrame = frameIndex;
+  auto latestFrame = m_current_game->GetFrameCount();
+  WARN_LOG(EXPANSIONINTERFACE, "[Frame %d] Playback current behind by: %d frames.", currentFrame,
+           latestFrame - currentFrame);
 
   // Return success code
   m_read_queue.push_back(requestResultCode);
@@ -575,6 +575,35 @@ void CEXISlippi::prepareIsStockSteal(u8* payload)
 
   u8 playerIsBack = players.count(playerIndex) ? 1 : 0;
   m_read_queue.push_back(playerIsBack);
+}
+
+void CEXISlippi::prepareFrameCount()
+{
+  m_read_queue.clear();
+
+  if (!m_current_game)
+  {
+    // Do not start if replay file doesn't exist
+    // TODO: maybe display error message?
+    INFO_LOG(EXPANSIONINTERFACE, "EXI_DeviceSlippi.cpp: Replay file does not exist");
+    m_read_queue.push_back(0);
+    return;
+  }
+
+  if (m_current_game->IsProcessingComplete())
+  {
+    m_read_queue.push_back(0);
+    return;
+  }
+
+  auto latestFrame = m_current_game->GetFrameCount();
+  auto frameCount = latestFrame - Slippi::GAME_FIRST_FRAME;
+  auto frameCountPlusBuffer = frameCount + 40;
+
+  u8 result = frameCountPlusBuffer > 0xFF ? 0xFF : (u8)frameCountPlusBuffer;
+  WARN_LOG(EXPANSIONINTERFACE, "EXI_DeviceSlippi.cpp: Fast forwarding by %d frames.", result);
+
+  m_read_queue.push_back(result);
 }
 
 void CEXISlippi::prepareIsFileReady()
@@ -652,6 +681,9 @@ void CEXISlippi::DMAWrite(u32 address, u32 size)
       break;
     case CMD_IS_STOCK_STEAL:
       prepareIsStockSteal(&memPtr[1]);
+      break;
+    case CMD_GET_FRAME_COUNT:
+      prepareFrameCount();
       break;
     case CMD_IS_FILE_READY:
       prepareIsFileReady();
