@@ -32,22 +32,10 @@
 
 enum
 {
-<<<<<<< HEAD
-  EXP_NOTHING = 0,
-  EXP_DUMMY = 1,
-  EXP_MEMORYCARD = 2,
-  EXP_BROADBAND = 2,
-  EXP_SLIPPI = 3,
-  EXP_GCI_FOLDER = 4,
-  EXP_GECKO = 5,
-  EXP_AGP = 6,
-  EXP_MICROPHONE = 7
-=======
   SLOT_A_INDEX,
   SLOT_B_INDEX,
   SLOT_SP1_INDEX,
   SLOT_COUNT
->>>>>>> 55da8473c9ad186b3dbb19e7d3e1b352d1f69483
 };
 
 GameCubePane::GameCubePane()
@@ -98,19 +86,15 @@ void GameCubePane::CreateWidgets()
 
   // Add slot devices
 
-<<<<<<< HEAD
-  for (const auto& device : {i10n_nothing, i10n_dummy, tr("Memory Card"), tr("Slippi"), tr("GCI Folder"),
-                             tr("USB Gecko"), tr("Advance Game Port"), tr("Microphone")})
-=======
   for (const auto& entry :
        {std::make_pair(tr("<Nothing>"), ExpansionInterface::EXIDEVICE_NONE),
         std::make_pair(tr("Dummy"), ExpansionInterface::EXIDEVICE_DUMMY),
         std::make_pair(tr("Memory Card"), ExpansionInterface::EXIDEVICE_MEMORYCARD),
+        std::make_pair(tr("Slippi"), ExpansionInterface::EXIDEVICE_SLIPPI),
         std::make_pair(tr("GCI Folder"), ExpansionInterface::EXIDEVICE_MEMORYCARDFOLDER),
         std::make_pair(tr("USB Gecko"), ExpansionInterface::EXIDEVICE_GECKO),
         std::make_pair(tr("Advance Game Port"), ExpansionInterface::EXIDEVICE_AGP),
         std::make_pair(tr("Microphone"), ExpansionInterface::EXIDEVICE_MIC)})
->>>>>>> 55da8473c9ad186b3dbb19e7d3e1b352d1f69483
   {
     m_slot_combos[0]->addItem(entry.first, entry.second);
     m_slot_combos[1]->addItem(entry.first, entry.second);
@@ -340,54 +324,10 @@ void GameCubePane::LoadSettings()
 
   for (int i = 0; i < SLOT_COUNT; i++)
   {
-<<<<<<< HEAD
-    int index = EXP_NOTHING;
-    switch (SConfig::GetInstance().m_EXIDevice[i])
-    {
-    case ExpansionInterface::EXIDEVICE_NONE:
-      index = EXP_NOTHING;
-      break;
-    case ExpansionInterface::EXIDEVICE_DUMMY:
-      index = EXP_DUMMY;
-      break;
-    case ExpansionInterface::EXIDEVICE_MEMORYCARD:
-      index = EXP_MEMORYCARD;
-      break;
-    case ExpansionInterface::EXIDEVICE_SLIPPI:
-      index = EXP_SLIPPI;
-      break;
-    case ExpansionInterface::EXIDEVICE_ETH:
-      index = EXP_BROADBAND;
-      break;
-    case ExpansionInterface::EXIDEVICE_MEMORYCARDFOLDER:
-      index = EXP_GCI_FOLDER;
-      break;
-    case ExpansionInterface::EXIDEVICE_GECKO:
-      index = EXP_GECKO;
-      break;
-    case ExpansionInterface::EXIDEVICE_AGP:
-      index = EXP_AGP;
-      break;
-    case ExpansionInterface::EXIDEVICE_MIC:
-      index = EXP_MICROPHONE;
-      break;
-    default:
-      break;
-    }
-
-    if (i <= SLOT_B_INDEX)
-    {
-      bool has_config = (index == EXP_MEMORYCARD || index > EXP_GECKO);
-      m_slot_buttons[i]->setEnabled(has_config);
-    }
-
-    m_slot_combos[i]->setCurrentIndex(index);
-=======
     QSignalBlocker blocker(m_slot_combos[i]);
     m_slot_combos[i]->setCurrentIndex(
         m_slot_combos[i]->findData(SConfig::GetInstance().m_EXIDevice[i]));
     UpdateButton(i);
->>>>>>> 55da8473c9ad186b3dbb19e7d3e1b352d1f69483
   }
 }
 
@@ -406,44 +346,7 @@ void GameCubePane::SaveSettings()
 
   for (int i = 0; i < SLOT_COUNT; i++)
   {
-<<<<<<< HEAD
-    auto dev = SConfig::GetInstance().m_EXIDevice[i];
-
-    int index = m_slot_combos[i]->currentIndex();
-
-    switch (index)
-    {
-    case EXP_NOTHING:
-      dev = ExpansionInterface::EXIDEVICE_NONE;
-      break;
-    case EXP_DUMMY:
-      dev = ExpansionInterface::EXIDEVICE_DUMMY;
-      break;
-    case EXP_MEMORYCARD:
-      if (i == SLOT_SP1_INDEX)
-        dev = ExpansionInterface::EXIDEVICE_ETH;
-      else
-        dev = ExpansionInterface::EXIDEVICE_MEMORYCARD;
-      break;
-    case EXP_SLIPPI:
-      dev = ExpansionInterface::EXIDEVICE_SLIPPI;
-      break;
-    case EXP_GCI_FOLDER:
-      dev = ExpansionInterface::EXIDEVICE_MEMORYCARDFOLDER;
-      break;
-    case EXP_GECKO:
-      dev = ExpansionInterface::EXIDEVICE_GECKO;
-      break;
-    case EXP_AGP:
-      dev = ExpansionInterface::EXIDEVICE_AGP;
-      break;
-    case EXP_MICROPHONE:
-      dev = ExpansionInterface::EXIDEVICE_MIC;
-      break;
-    }
-=======
     const auto dev = ExpansionInterface::TEXIDevices(m_slot_combos[i]->currentData().toInt());
->>>>>>> 55da8473c9ad186b3dbb19e7d3e1b352d1f69483
 
     if (Core::IsRunning() && SConfig::GetInstance().m_EXIDevice[i] != dev)
     {
