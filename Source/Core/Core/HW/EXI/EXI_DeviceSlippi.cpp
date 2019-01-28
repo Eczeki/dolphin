@@ -596,7 +596,7 @@ void CEXISlippi::prepareFrameCount()
     return;
   }
 
-  int bufferCount = 10;
+  int bufferCount = 15;
 
   // Make sure we've loaded all the latest data, maybe this should be part of GetFrameCount
   auto latestFrame = m_current_game->GetFrameCount();
