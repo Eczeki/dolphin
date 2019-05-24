@@ -393,4 +393,4 @@ static void DVDThread()
     }
   }
 }
-}
+}  // namespace DVDThread

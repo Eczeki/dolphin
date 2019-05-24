@@ -50,3 +50,5 @@ Externals/SlippiLib/cmake_install.cmake
 Ishiiruka.pro
 Source/.idea
 *.Build.CppClean.log
+# Ignore Visual Studio Code's working dir
+/.vscode/
