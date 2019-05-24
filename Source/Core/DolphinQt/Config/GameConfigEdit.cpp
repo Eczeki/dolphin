@@ -10,16 +10,16 @@
 #include <QFile>
 #include <QMenu>
 #include <QMenuBar>
-#include <QMessageBox>
+#include <QPushButton>
 #include <QScrollBar>
 #include <QStringListModel>
 #include <QTextCursor>
 #include <QTextEdit>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWhatsThis>
 
 #include "DolphinQt/Config/GameConfigHighlighter.h"
+#include "DolphinQt/QtUtils/ModalMessageBox.h"
 
 GameConfigEdit::GameConfigEdit(QWidget* parent, const QString& path, bool read_only)
     : m_path(path), m_read_only(read_only)
@@ -63,7 +63,7 @@ GameConfigEdit::GameConfigEdit(QWidget* parent, const QString& path, bool read_o
 
   m_completer = new QCompleter(m_edit);
 
-  auto* completion_model = new QStringListModel;
+  auto* completion_model = new QStringListModel(m_completer);
   completion_model->setStringList(m_completions);
 
   m_completer->setModel(completion_model);
@@ -77,20 +77,19 @@ GameConfigEdit::GameConfigEdit(QWidget* parent, const QString& path, bool read_o
 
 void GameConfigEdit::CreateWidgets()
 {
-  m_menu = new QMenu;
-
   m_edit = new QTextEdit;
   m_edit->setReadOnly(m_read_only);
   m_edit->setAcceptRichText(false);
 
   auto* layout = new QVBoxLayout;
 
-  auto* menu_button = new QToolButton;
+  auto* menu_button = new QPushButton;
 
-  menu_button->setText(tr("Presets") + QStringLiteral(" "));
+  menu_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+  menu_button->setText(tr("Presets"));
+
+  m_menu = new QMenu(menu_button);
   menu_button->setMenu(m_menu);
-
-  connect(menu_button, &QToolButton::pressed, [menu_button] { menu_button->showMenu(); });
 
   layout->addWidget(menu_button);
   layout->addWidget(m_edit);
@@ -121,12 +120,15 @@ void GameConfigEdit::SaveFile()
   QFile file(m_path);
 
   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+  {
+    ModalMessageBox::warning(this, tr("Warning"), tr("Failed to open config file!"));
     return;
+  }
 
   const QByteArray contents = m_edit->toPlainText().toUtf8();
 
-  if (!file.write(contents))
-    QMessageBox::warning(this, tr("Warning"), tr("Failed to write config file!"));
+  if (file.write(contents) == -1)
+    ModalMessageBox::warning(this, tr("Warning"), tr("Failed to write config file!"));
 }
 
 void GameConfigEdit::ConnectWidgets()
@@ -212,10 +214,10 @@ void GameConfigEdit::AddMenubarOptions()
     auto* video_menubar = m_menu->addMenu(tr("Video"));
 
     AddBoolOption(video_menubar, tr("Store EFB Copies to Texture Only"),
-                  QStringLiteral("Video_Settings"), QStringLiteral("EFBToTextureEnable"));
+                  QStringLiteral("Video_Hacks"), QStringLiteral("EFBToTextureEnable"));
 
     AddBoolOption(video_menubar, tr("Store XFB Copies to Texture Only"),
-                  QStringLiteral("Video_Settings"), QStringLiteral("XFBToTextureEnable"));
+                  QStringLiteral("Video_Hacks"), QStringLiteral("XFBToTextureEnable"));
 
     {
       auto* texture_cache = video_menubar->addMenu(tr("Texture Cache"));
@@ -258,7 +260,12 @@ void GameConfigEdit::OpenExternalEditor()
     file.close();
   }
 
-  QDesktopServices::openUrl(QUrl::fromLocalFile(m_path));
+  if (!QDesktopServices::openUrl(QUrl::fromLocalFile(m_path)))
+  {
+    ModalMessageBox::warning(this, tr("Error"),
+                             tr("Failed to open file in external editor.\nMake sure there's an "
+                                "application assigned to open INI files."));
+  }
 }
 
 void GameConfigEdit::keyPressEvent(QKeyEvent* e)

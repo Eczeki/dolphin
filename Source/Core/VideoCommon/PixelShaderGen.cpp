@@ -171,8 +171,7 @@ PixelShaderUid GetPixelShaderUid()
   uid_data->genMode_numindstages = bpmem.genMode.numindstages;
   uid_data->genMode_numtevstages = bpmem.genMode.numtevstages;
   uid_data->genMode_numtexgens = bpmem.genMode.numtexgens;
-  uid_data->bounding_box = g_ActiveConfig.BBoxUseFragmentShaderImplementation() &&
-                           g_ActiveConfig.bBBoxEnable && BoundingBox::active;
+  uid_data->bounding_box = g_ActiveConfig.bBBoxEnable && BoundingBox::active;
   uid_data->rgba6_format =
       bpmem.zcontrol.pixel_format == PEControl::RGBA6_Z24 && !g_ActiveConfig.bForceTrueColor;
   uid_data->dither = bpmem.blendmode.dither && uid_data->rgba6_format;
@@ -348,6 +347,10 @@ void ClearUnusedPixelShaderUidBits(APIType ApiType, const ShaderHostConfig& host
   // uint output when logic op is not supported (i.e. driver/device does not support D3D11.1).
   if (ApiType != APIType::D3D || !host_config.backend_logic_op)
     uid_data->uint_output = 0;
+
+  // If bounding box is enabled when a UID cache is created, then later disabled, we shouldn't
+  // emit the bounding box portion of the shader.
+  uid_data->bounding_box &= host_config.bounding_box & host_config.backend_bbox;
 }
 
 void WritePixelShaderCommonHeader(ShaderCode& out, APIType ApiType, u32 num_texgens,
@@ -445,21 +448,65 @@ void WritePixelShaderCommonHeader(ShaderCode& out, APIType ApiType, u32 num_texg
 
   if (bounding_box)
   {
-    if (ApiType == APIType::OpenGL || ApiType == APIType::Vulkan)
-    {
-      out.Write("SSBO_BINDING(0) buffer BBox {\n"
-                "\tint bbox_left, bbox_right, bbox_top, bbox_bottom;\n"
-                "};\n");
-    }
-    else
-    {
-      out.Write("globallycoherent RWBuffer<int> bbox_data : register(u2);\n");
-    }
-  }
+    out.Write(R"(
+#ifdef API_D3D
+globallycoherent RWBuffer<int> bbox_data : register(u2);
+#define atomicMin InterlockedMin
+#define atomicMax InterlockedMax
+#define bbox_left bbox_data[0]
+#define bbox_right bbox_data[1]
+#define bbox_top bbox_data[2]
+#define bbox_bottom bbox_data[3]
+#else
+SSBO_BINDING(0) buffer BBox {
+  int bbox_left, bbox_right, bbox_top, bbox_bottom;
+};
+#endif
 
-  out.Write("struct VS_OUTPUT {\n");
-  GenerateVSOutputMembers(out, ApiType, num_texgens, host_config, "");
-  out.Write("};\n");
+void UpdateBoundingBoxBuffer(int2 min_pos, int2 max_pos) {
+  if (bbox_left > min_pos.x)
+    atomicMin(bbox_left, min_pos.x);
+  if (bbox_right < max_pos.x)
+    atomicMax(bbox_right, max_pos.x);
+  if (bbox_top > min_pos.y)
+    atomicMin(bbox_top, min_pos.y);
+  if (bbox_bottom < max_pos.y)
+    atomicMax(bbox_bottom, max_pos.y);
+}
+
+void UpdateBoundingBox(float2 rawpos) {
+  // The pixel center in the GameCube GPU is 7/12, not 0.5 (see VertexShaderGen.cpp)
+  // Adjust for this by unapplying the offset we added in the vertex shader.
+  const float PIXEL_CENTER_OFFSET = 7.0 / 12.0 - 0.5;
+  float2 offset = float2(PIXEL_CENTER_OFFSET, -PIXEL_CENTER_OFFSET);
+
+#ifdef API_OPENGL
+  // OpenGL lower-left origin means that Y goes in the opposite direction.
+  offset.y = -offset.y;
+#endif
+
+  // The rightmost shaded pixel is not included in the right bounding box register,
+  // such that width = right - left + 1. This has been verified on hardware.
+  int2 pos = iround(rawpos * cefbscale + offset);
+
+#ifdef SUPPORTS_SUBGROUP_REDUCTION
+  if (CAN_USE_SUBGROUP_REDUCTION) {
+    int2 min_pos = IS_HELPER_INVOCATION ? int2(2147483647, 2147483647) : pos;
+    int2 max_pos = IS_HELPER_INVOCATION ? int2(-2147483648, -2147483648) : pos;
+    SUBGROUP_MIN(min_pos);
+    SUBGROUP_MAX(max_pos);
+    if (IS_FIRST_ACTIVE_INVOCATION)
+      UpdateBoundingBoxBuffer(min_pos, max_pos);
+  } else {
+    UpdateBoundingBoxBuffer(pos, pos);
+  }
+#else
+  UpdateBoundingBoxBuffer(pos, pos);
+#endif
+}
+
+)");
+  }
 }
 
 static void WriteStage(ShaderCode& out, const pixel_shader_uid_data* uid_data, int n,
@@ -804,7 +851,7 @@ ShaderCode GeneratePixelShaderCode(APIType ApiType, const ShaderHostConfig& host
   }
   else
   {
-    if (ApiType == APIType::D3D || ApiType == APIType::Vulkan)
+    if (!host_config.backend_reversed_depth_range)
       out.Write("\tint zCoord = int((1.0 - rawpos.z) * 16777216.0);\n");
     else
       out.Write("\tint zCoord = int(rawpos.z * 16777216.0);\n");
@@ -818,7 +865,7 @@ ShaderCode GeneratePixelShaderCode(APIType ApiType, const ShaderHostConfig& host
   // Note: z-textures are not written to depth buffer if early depth test is used
   if (uid_data->per_pixel_depth && uid_data->early_ztest)
   {
-    if (ApiType == APIType::D3D || ApiType == APIType::Vulkan)
+    if (!host_config.backend_reversed_depth_range)
       out.Write("\tdepth = 1.0 - float(zCoord) / 16777216.0;\n");
     else
       out.Write("\tdepth = float(zCoord) / 16777216.0;\n");
@@ -839,7 +886,7 @@ ShaderCode GeneratePixelShaderCode(APIType ApiType, const ShaderHostConfig& host
 
   if (uid_data->per_pixel_depth && uid_data->late_ztest)
   {
-    if (ApiType == APIType::D3D || ApiType == APIType::Vulkan)
+    if (!host_config.backend_reversed_depth_range)
       out.Write("\tdepth = 1.0 - float(zCoord) / 16777216.0;\n");
     else
       out.Write("\tdepth = float(zCoord) / 16777216.0;\n");
@@ -864,23 +911,7 @@ ShaderCode GeneratePixelShaderCode(APIType ApiType, const ShaderHostConfig& host
     WriteBlend(out, uid_data);
 
   if (uid_data->bounding_box)
-  {
-    if (ApiType == APIType::D3D)
-    {
-      out.Write(
-          "\tif(bbox_data[0] > int(rawpos.x)) InterlockedMin(bbox_data[0], int(rawpos.x));\n"
-          "\tif(bbox_data[1] < int(rawpos.x)) InterlockedMax(bbox_data[1], int(rawpos.x));\n"
-          "\tif(bbox_data[2] > int(rawpos.y)) InterlockedMin(bbox_data[2], int(rawpos.y));\n"
-          "\tif(bbox_data[3] < int(rawpos.y)) InterlockedMax(bbox_data[3], int(rawpos.y));\n");
-    }
-    else
-    {
-      out.Write("\tif(bbox_left > int(rawpos.x)) atomicMin(bbox_left, int(rawpos.x));\n"
-                "\tif(bbox_right < int(rawpos.x)) atomicMax(bbox_right, int(rawpos.x));\n"
-                "\tif(bbox_top > int(rawpos.y)) atomicMin(bbox_top, int(rawpos.y));\n"
-                "\tif(bbox_bottom < int(rawpos.y)) atomicMax(bbox_bottom, int(rawpos.y));\n");
-    }
-  }
+    out.Write("\tUpdateBoundingBox(rawpos.xy);\n");
 
   out.Write("}\n");
 
@@ -1316,14 +1347,14 @@ static void WriteAlphaTest(ShaderCode& out, const pixel_shader_uid_data* uid_dat
   if (per_pixel_depth)
   {
     out.Write("\t\tdepth = %s;\n",
-              (ApiType == APIType::D3D || ApiType == APIType::Vulkan) ? "0.0" : "1.0");
+              !g_ActiveConfig.backend_info.bSupportsReversedDepthRange ? "0.0" : "1.0");
   }
 
   // ZCOMPLOC HACK:
   if (!uid_data->alpha_test_use_zcomploc_hack)
   {
     out.Write("\t\tdiscard;\n");
-    if (ApiType != APIType::D3D)
+    if (ApiType == APIType::D3D)
       out.Write("\t\treturn;\n");
   }
 

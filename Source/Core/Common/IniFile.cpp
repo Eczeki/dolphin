@@ -20,7 +20,7 @@
 
 void IniFile::ParseLine(const std::string& line, std::string* keyOut, std::string* valueOut)
 {
-  if (line[0] == '#')
+  if (line.empty() || line.front() == '#')
     return;
 
   size_t firstEquals = line.find('=');
@@ -47,14 +47,11 @@ IniFile::Section::Section(std::string name_) : name{std::move(name_)}
 
 void IniFile::Section::Set(const std::string& key, std::string new_value)
 {
-  auto it = values.find(key);
-  if (it != values.end())
-    it->second = std::move(new_value);
-  else
-  {
-    values[key] = std::move(new_value);
+  const auto result = values.insert_or_assign(key, std::move(new_value));
+  const bool insertion_occurred = result.second;
+
+  if (insertion_occurred)
     keys_order.push_back(key);
-  }
 }
 
 bool IniFile::Section::Get(const std::string& key, std::string* value,
@@ -265,7 +262,7 @@ bool IniFile::Load(const std::string& filename, bool keep_current_data)
     }
 #endif
 
-    if (line.size() > 0)
+    if (!line.empty())
     {
       if (line[0] == '[')
       {
@@ -288,8 +285,8 @@ bool IniFile::Load(const std::string& filename, bool keep_current_data)
           // Lines starting with '$', '*' or '+' are kept verbatim.
           // Kind of a hack, but the support for raw lines inside an
           // INI is a hack anyway.
-          if ((key == "" && value == "") ||
-              (line.size() >= 1 && (line[0] == '$' || line[0] == '+' || line[0] == '*')))
+          if ((key.empty() && value.empty()) ||
+              (!line.empty() && (line[0] == '$' || line[0] == '+' || line[0] == '*')))
             current_section->m_lines.push_back(line);
           else
             current_section->Set(key, value);
@@ -315,10 +312,10 @@ bool IniFile::Save(const std::string& filename)
 
   for (const Section& section : sections)
   {
-    if (section.keys_order.size() != 0 || section.m_lines.size() != 0)
+    if (!section.keys_order.empty() || !section.m_lines.empty())
       out << '[' << section.name << ']' << std::endl;
 
-    if (section.keys_order.size() == 0)
+    if (section.keys_order.empty())
     {
       for (const std::string& s : section.m_lines)
         out << s << std::endl;

@@ -35,6 +35,10 @@ bool Host_UINeedsControllerState()
 {
   return false;
 }
+bool Host_UIBlocksControllerState()
+{
+  return false;
+}
 bool Host_RendererHasFocus()
 {
   return false;
@@ -47,5 +51,8 @@ void Host_YieldToUI()
 {
 }
 void Host_UpdateProgressDialog(const char* caption, int position, int total)
+{
+}
+void Host_TitleChanged()
 {
 }
