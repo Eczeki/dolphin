@@ -535,6 +535,7 @@ add_subdirectory(Externals/imgui)
 
 add_subdirectory(Externals/SlippiLib)
 include_directories(Externals/SlippiLib)
+include_directories(Externals/nlohmann)
 
 find_package(pugixml)
 if(NOT pugixml_FOUND)

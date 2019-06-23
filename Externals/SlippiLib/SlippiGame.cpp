@@ -73,6 +73,12 @@ namespace Slippi {
       }
     }
 
+	// Read isPAL byte
+	game->settings.isPAL = readByte(data, idx, maxSize, 0);
+
+	// Read isFrozenPS byte
+	game->settings.isFrozenPS = readByte(data, idx, maxSize, 0);
+
     // Pull header data into struct
     int player1Pos = 24; // This is the index of the first players character info
     std::array<uint32_t, Slippi::GAME_INFO_HEADER_SIZE> gameInfoHeader = game->settings.header;
@@ -101,6 +107,15 @@ namespace Slippi {
     }
 
     game->settings.stage = gameInfoHeader[3] & 0xFFFF;
+
+	// Indicate settings loaded immediately if after version 1.6.0
+	// Sheik game info was added in this version and so we no longer
+	// need to wait
+	auto majorVersion = game->version[0];
+	auto minorVersion = game->version[1];
+	if (majorVersion > 1 || (majorVersion == 1 && minorVersion >= 6)) {
+		game->areSettingsLoaded = true;
+	}
   }
 
   void handlePreFrameUpdate(Game* game, uint32_t maxSize) {
@@ -426,6 +441,11 @@ namespace Slippi {
   bool SlippiGame::DoesFrameExist(int32_t frame) {
     processData();
     return (bool)game->frameData.count(frame);
+  }
+
+  std::array<uint8_t, 4> SlippiGame::GetVersion()
+  {
+	  return game->version;
   }
 
   FrameData* SlippiGame::GetFrame(int32_t frame) {

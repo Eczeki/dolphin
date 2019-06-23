@@ -335,12 +335,6 @@ void CEXISlippi::closeFile()
   m_file = nullptr;
 }
 
-void CEXISlippi::loadFile(std::string path)
-{
-  // This doesn't like newline characters in the path, just FYI
-  m_current_game = Slippi::SlippiGame::FromFile((std::string)path);
-}
-
 void CEXISlippi::prepareGameInfo()
 {
   // Since we are prepping new data, clear any existing data
@@ -362,6 +356,11 @@ void CEXISlippi::prepareGameInfo()
   m_read_queue.push_back(1);
 
   Slippi::GameSettings* settings = m_current_game->GetSettings();
+
+  // Start in Fast Forward if this is mirrored
+  auto replayCommSettings = replayComm->getSettings();
+  isHardFFW = replayCommSettings.mode == "mirror";
+  lastFFWFrame = INT_MIN;
 
   // Build a word containing the stage and the presence of the characters
   u32 randomSeed = settings->randomSeed;
@@ -420,6 +419,21 @@ void CEXISlippi::prepareGameInfo()
       appendHalfToBuffer(&m_read_queue, player.nametag[j]);
     }
   }
+
+  // Write PAL byte
+  m_read_queue.push_back(settings->isPAL);
+
+  // Get replay version numbers
+  auto replayVersion = m_current_game->GetVersion();
+  auto majorVersion = replayVersion[0];
+  auto minorVersion = replayVersion[1];
+
+  // Write PS pre-load byte
+  auto shouldPreloadPs = majorVersion > 1 || (majorVersion == 1 && minorVersion > 2);
+  m_read_queue.push_back(shouldPreloadPs);
+
+  // Write PS Frozen byte
+  m_read_queue.push_back(settings->isFrozenPS);
 }
 
 void CEXISlippi::prepareCharacterFrameData(int32_t frameIndex, u8 port, u8 isFollower)
@@ -496,13 +510,20 @@ void CEXISlippi::prepareFrameData(u8* payload)
   // Parse input
   int32_t frameIndex = payload[0] << 24 | payload[1] << 16 | payload[2] << 8 | payload[3];
 
-  //INFO_LOG(EXPANSIONINTERFACE, "Frame %d has been requested!", frameIndex);
+  // If loading from queue, move on to the next replay if we have past endFrame
+  auto watchSettings = replayComm->current;
+  if (frameIndex > watchSettings.endFrame)
+  {
+    INFO_LOG(EXPANSIONINTERFACE, "Killing game because we are past endFrame");
+    m_read_queue.push_back(FRAME_RESP_TERMINATE);
+    return;
+  }
 
   // If a new replay should be played, terminate the current game
-  auto isNewReplay = replayComm->isReplayReady();
+  auto isNewReplay = replayComm->isNewReplay();
   if (isNewReplay)
   {
-    m_read_queue.push_back(2);
+    m_read_queue.push_back(FRAME_RESP_TERMINATE);
     return;
   }
 
@@ -513,26 +534,84 @@ void CEXISlippi::prepareFrameData(u8* payload)
   // data from this frame. Don't wait until next frame is processing is complete
   // (this is the last frame, in that case)
   auto isFrameFound = m_current_game->DoesFrameExist(frameIndex);
-  auto isNextFrameFound = m_current_game->DoesFrameExist(frameIndex + 1);
+  auto latestFrame = m_current_game->GetFrameCount();
+  auto isNextFrameFound = latestFrame > frameIndex;
   auto isFrameComplete = checkFrameFullyFetched(frameIndex);
   auto isFrameReady = isFrameFound && (isProcessingComplete || isNextFrameFound || isFrameComplete);
 
-  u8 requestResultCode = 1;
+  // If there is a startFrame configured, manage the fast-forward flag
+  if (watchSettings.startFrame > Slippi::GAME_FIRST_FRAME)
+  {
+    if (frameIndex < watchSettings.startFrame)
+    {
+      isHardFFW = true;
+    }
+    else if (frameIndex == watchSettings.startFrame)
+    {
+      // TODO: This might disable fast forward on first frame when we dont want to?
+      isHardFFW = false;
+    }
+  }
+
+  // If RealTimeMode is enabled, let's trigger fast forwarding under certain conditions
+  auto commSettings = replayComm->getSettings();
+  auto isFarBehind = latestFrame - frameIndex > 2;
+  auto isVeryFarBehind = latestFrame - frameIndex > 25;
+  if (isFarBehind && commSettings.mode == "mirror" && commSettings.isRealTimeMode)
+  {
+    isSoftFFW = true;
+
+    // Once isHardFFW has been turned on, do not turn it off with this condition, should
+    // hard FFW to the latest point
+    if (!isHardFFW)
+    {
+      isHardFFW = isVeryFarBehind;
+    }
+  }
+
+  if (latestFrame - frameIndex == 0)
+  {
+    // The reason to disable fast forwarding here is in hopes
+    // of disabling it on the last frame that we have actually received.
+    // Doing this will allow the rendering logic to run to display the
+    // last frame instead of the frame previous to fast forwarding.
+    // Not sure if this fully works with partial frames
+    isSoftFFW = false;
+    isHardFFW = false;
+  }
+
+  bool shouldFFW = shouldFFWFrame(frameIndex);
+  u8 requestResultCode = shouldFFW ? FRAME_RESP_FASTFORWARD : FRAME_RESP_CONTINUE;
   if (!isFrameReady)
   {
     // If processing is complete, the game has terminated early. Tell our playback
     // to end the game as well.
     auto shouldTerminateGame = isProcessingComplete;
-    requestResultCode = shouldTerminateGame ? 2 : 0;
+    requestResultCode = shouldTerminateGame ? FRAME_RESP_TERMINATE : FRAME_RESP_WAIT;
 
     m_read_queue.push_back(requestResultCode);
+
+    // Disable fast forward here too... this shouldn't be necessary but better
+    // safe than sorry I guess
+    isSoftFFW = false;
+    isHardFFW = false;
+
+    if (requestResultCode == FRAME_RESP_TERMINATE)
+    {
+      ERROR_LOG(EXPANSIONINTERFACE, "Game should terminate on frame %d [%X]", frameIndex,
+                frameIndex);
+    }
+
     return;
   }
 
-  auto currentFrame = frameIndex;
-  auto latestFrame = m_current_game->GetFrameCount();
-  WARN_LOG(EXPANSIONINTERFACE, "[Frame %d] Playback current behind by: %d frames.", currentFrame,
-           latestFrame - currentFrame);
+  // Keep track of last FFW frame, used for soft FFW's
+  if (shouldFFW)
+  {
+    WARN_LOG(EXPANSIONINTERFACE, "[Frame %d] FFW frame, behind by: %d frames.", frameIndex,
+             latestFrame - frameIndex);
+    lastFFWFrame = frameIndex;
+  }
 
   // Return success code
   m_read_queue.push_back(requestResultCode);
@@ -543,6 +622,25 @@ void CEXISlippi::prepareFrameData(u8* payload)
     prepareCharacterFrameData(frameIndex, port, 0);
     prepareCharacterFrameData(frameIndex, port, 1);
   }
+}
+
+bool CEXISlippi::shouldFFWFrame(int32_t frameIndex)
+{
+  if (!isSoftFFW && !isHardFFW)
+  {
+    // If no FFW at all, don't FFW this frame
+    return false;
+  }
+
+  if (isHardFFW)
+  {
+    // For a hard FFW, always FFW until it's turned off
+    return true;
+  }
+
+  // Here we have a soft FFW, we only want to turn on FFW for single frames once
+  // every X frames to FFW in a more smooth manner
+  return frameIndex - lastFFWFrame >= 15;
 }
 
 void CEXISlippi::prepareIsStockSteal(u8* payload)
@@ -614,17 +712,17 @@ void CEXISlippi::prepareIsFileReady()
 {
   m_read_queue.clear();
 
-  auto isNewReplayReady = replayComm->isReplayReady();
-  if (!isNewReplayReady)
+  auto isNewReplay = replayComm->isNewReplay();
+  if (!isNewReplay)
   {
+    replayComm->nextReplay();
     m_read_queue.push_back(0);
     return;
   }
 
-  auto replayFilePath = replayComm->getReplay();
-  INFO_LOG(EXPANSIONINTERFACE, "EXI_DeviceSlippi.cpp: Attempting to load replay file %s",
-           replayFilePath.c_str());
-  loadFile(replayFilePath);
+  // Attempt to load game if there is a new replay file
+  // this can come pack falsy if the replay file does not exist
+  m_current_game = replayComm->loadGame();
 
   if (!m_current_game)
   {

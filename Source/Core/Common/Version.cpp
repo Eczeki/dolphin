@@ -23,7 +23,8 @@ namespace Common
 //                                "[" SCM_BRANCH_STR "] "
 //#endif
 
-const std::string scm_rev_str = "Dolphin Slippi r12";
+#define SLIPPI_REV_STR "r18"
+const std::string scm_rev_str = "Dolphin Slippi (" SLIPPI_REV_STR ")";
 
 //#ifdef __INTEL_COMPILER
 //    BUILD_TYPE_STR SCM_DESC_STR "-ICC";
@@ -37,10 +38,10 @@ const std::string scm_branch_str = SCM_BRANCH_STR;
 const std::string scm_distributor_str = SCM_DISTRIBUTOR_STR;
 
 #ifdef _WIN32
-const std::string netplay_dolphin_ver = "Slippi r12 Win";
+const std::string netplay_dolphin_ver = "Slippi-" SLIPPI_REV_STR " Win";
 #elif __APPLE__
-const std::string netplay_dolphin_ver = "Slippi r12 Mac";
+const std::string netplay_dolphin_ver = "Slippi-" SLIPPI_REV_STR " Mac";
 #else
-const std::string netplay_dolphin_ver = "Slippi r12 Lin";
+const std::string netplay_dolphin_ver = "Slippi-" SLIPPI_REV_STR " Lin";
 #endif
 }  // namespace Common

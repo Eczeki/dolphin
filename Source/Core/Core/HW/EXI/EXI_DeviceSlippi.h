@@ -45,6 +45,14 @@ private:
     CMD_GET_FRAME_COUNT = 0x90
   };
 
+  enum
+  {
+    FRAME_RESP_WAIT = 0,
+    FRAME_RESP_CONTINUE = 1,
+    FRAME_RESP_TERMINATE = 2,
+    FRAME_RESP_FASTFORWARD = 3,
+  };
+
   std::unordered_map<u8, u32> payloadSizes = {
       // The actual size of this command will be sent in one byte
       // after the command is received. The other receive command IDs
@@ -80,6 +88,7 @@ private:
   void closeFile();
   std::string generateFileName();
   bool checkFrameFullyFetched(int32_t frameIndex);
+  bool shouldFFWFrame(int32_t frameIndex);
 
   // std::ofstream log;
 
@@ -87,7 +96,6 @@ private:
   std::vector<u8> m_payload;
 
   // replay playback stuff
-  void loadFile(std::string path);
   void prepareGameInfo();
   void prepareCharacterFrameData(int32_t frameIndex, u8 port, u8 isFollower);
   void prepareFrameData(u8* payload);
@@ -97,6 +105,9 @@ private:
 
   std::unordered_map<u8, std::string> getNetplayNames();
 
+  bool isSoftFFW = false;
+  bool isHardFFW = false;
+  int32_t lastFFWFrame = INT_MIN;
   std::vector<u8> m_read_queue;
   Slippi::SlippiGame* m_current_game = nullptr;
 

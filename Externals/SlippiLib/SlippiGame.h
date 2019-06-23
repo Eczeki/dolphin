@@ -77,6 +77,8 @@ namespace Slippi {
     std::array<uint32_t, GAME_INFO_HEADER_SIZE> header;
     std::array<uint32_t, UCF_TOGGLE_SIZE> ucfToggles;
     std::unordered_map<uint8_t, PlayerSettings> players;
+	uint8_t isPAL;
+	uint8_t isFrozenPS;
   } GameSettings;
 
   typedef struct {
@@ -106,6 +108,7 @@ namespace Slippi {
     static SlippiGame* FromFile(std::string path);
     bool AreSettingsLoaded();
     bool DoesFrameExist(int32_t frame);
+	std::array<uint8_t, 4> GetVersion();
     FrameData* GetFrame(int32_t frame);
     int32_t GetFrameCount();
     GameSettings* GetSettings();
