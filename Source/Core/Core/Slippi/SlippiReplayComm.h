@@ -3,6 +3,7 @@
 #include <SlippiGame.h>
 #include <queue>
 #include <string>
+#include <climits>
 
 #include <json.hpp>
 using json = nlohmann::json;
