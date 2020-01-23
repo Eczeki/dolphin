@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Common/Analytics.h"
@@ -28,6 +29,18 @@ enum class GameQuirk
   // "read" extension or IR data. This would break our current TAS/NetPlay implementation.
   DIRECTLY_READS_WIIMOTE_INPUT,
 
+  // Several Wii DI commands that are rarely/never used and not implemented by Dolphin
+  USES_DVD_LOW_STOP_LASER,
+  USES_DVD_LOW_OFFSET,
+  USES_DVD_LOW_READ_DISK_BCA,  // NSMBW known to use this
+  USES_DVD_LOW_REQUEST_DISC_STATUS,
+  USES_DVD_LOW_REQUEST_RETRY_NUMBER,
+  USES_DVD_LOW_SER_MEAS_CONTROL,
+
+  // Dolphin only implements the simple DVDLowOpenPartition, not any of the variants where some
+  // already-read data is provided
+  USES_DIFFERENT_PARTITION_COMMAND,
+
   COUNT,
 };
 
@@ -35,7 +48,7 @@ class DolphinAnalytics
 {
 public:
   // Performs lazy-initialization of a singleton and returns the instance.
-  static std::shared_ptr<DolphinAnalytics> Instance();
+  static DolphinAnalytics& Instance();
 
 #if defined(ANDROID)
   // Get value from java.
@@ -49,7 +62,7 @@ public:
   void GenerateNewIdentity();
 
   // Reports a Dolphin start event.
-  void ReportDolphinStart(const std::string& ui_type);
+  void ReportDolphinStart(std::string_view ui_type);
 
   // Generates a base report for a "Game start" event. Also preseeds the
   // per-game base data.
@@ -75,7 +88,7 @@ public:
   template <typename T>
   void Send(T report)
   {
-    std::lock_guard<std::mutex> lk(m_reporter_mutex);
+    std::lock_guard lk{m_reporter_mutex};
     m_reporter.Send(report);
   }
 
@@ -88,7 +101,7 @@ private:
   // Returns a unique ID derived on the global unique ID, hashed with some
   // report-specific data. This avoid correlation between different types of
   // events.
-  std::string MakeUniqueId(const std::string& data);
+  std::string MakeUniqueId(std::string_view data) const;
 
   // Unique ID. This should never leave the application. Only used derived
   // values created by MakeUniqueId.
@@ -123,9 +136,4 @@ private:
 
   std::mutex m_reporter_mutex;
   Common::AnalyticsReporter m_reporter;
-
-  // Shared pointer in order to allow for multithreaded use of the instance and
-  // avoid races at reinitialization time.
-  static std::mutex s_instance_mutex;
-  static std::shared_ptr<DolphinAnalytics> s_instance;
 };

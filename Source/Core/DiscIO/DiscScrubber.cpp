@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "Common/Align.h"
 #include "Common/CommonTypes.h"
 #include "Common/File.h"
 #include "Common/Logging/Log.h"
@@ -44,11 +45,8 @@ bool DiscScrubber::SetupScrub(const Volume* disc, int block_size)
 
   m_file_size = m_disc->GetSize();
 
-  const size_t num_clusters = static_cast<size_t>(m_file_size / CLUSTER_SIZE);
-
-  // Warn if not DVD5 or DVD9 size
-  if (num_clusters != 0x23048 && num_clusters != 0x46090)
-    WARN_LOG(DISCIO, "Not a standard sized Wii disc! (%zx blocks)", num_clusters);
+  // Round up when diving by CLUSTER_SIZE, otherwise MarkAsUsed might write out of bounds
+  const size_t num_clusters = static_cast<size_t>((m_file_size + CLUSTER_SIZE - 1) / CLUSTER_SIZE);
 
   // Table of free blocks
   m_free_table.resize(num_clusters, 1);
@@ -127,7 +125,7 @@ u64 DiscScrubber::ToClusterOffset(u64 offset) const
   if (m_disc->IsEncryptedAndHashed())
     return offset / 0x7c00 * CLUSTER_SIZE;
   else
-    return offset % CLUSTER_SIZE;
+    return Common::AlignDown(offset, CLUSTER_SIZE);
 }
 
 // Helper functions for reading the BE volume

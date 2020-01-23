@@ -36,7 +36,7 @@ std::vector<GeckoCode> DownloadCodes(std::string gametdb_id, bool* succeeded)
   std::vector<GeckoCode> gcodes;
 
   // parse the codes
-  std::istringstream ss(reinterpret_cast<const char*>(response->data()));
+  std::istringstream ss(std::string(response->begin(), response->end()));
 
   std::string line;
 
@@ -144,6 +144,7 @@ std::vector<GeckoCode> LoadCodes(const IniFile& globalIni, const IniFile& localI
       // enabled or disabled code
       case '+':
         ss.seekg(1);
+        [[fallthrough]];
       case '$':
         if (!gcode.name.empty())
           gcodes.push_back(gcode);
