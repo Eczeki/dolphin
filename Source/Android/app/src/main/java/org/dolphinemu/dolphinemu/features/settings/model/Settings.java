@@ -2,6 +2,7 @@ package org.dolphinemu.dolphinemu.features.settings.model;
 
 import android.text.TextUtils;
 
+import org.dolphinemu.dolphinemu.NativeLibrary;
 import org.dolphinemu.dolphinemu.features.settings.ui.SettingsActivityView;
 import org.dolphinemu.dolphinemu.features.settings.utils.SettingsFile;
 
@@ -16,6 +17,7 @@ public class Settings
 {
   public static final String SECTION_INI_CORE = "Core";
   public static final String SECTION_INI_INTERFACE = "Interface";
+  public static final String SECTION_INI_DSP = "DSP";
 
   public static final String SECTION_GFX_SETTINGS = "Settings";
   public static final String SECTION_GFX_ENHANCEMENTS = "Enhancements";
@@ -40,8 +42,8 @@ public class Settings
   static
   {
     configFileSectionsMap.put(SettingsFile.FILE_NAME_DOLPHIN,
-            Arrays.asList(SECTION_INI_CORE, SECTION_INI_INTERFACE, SECTION_BINDINGS,
-                    SECTION_ANALYTICS, SECTION_DEBUG));
+            Arrays.asList(SECTION_INI_CORE, SECTION_INI_INTERFACE, SECTION_INI_DSP,
+                    SECTION_BINDINGS, SECTION_ANALYTICS, SECTION_DEBUG));
     configFileSectionsMap.put(SettingsFile.FILE_NAME_GFX,
             Arrays.asList(SECTION_GFX_SETTINGS, SECTION_GFX_ENHANCEMENTS, SECTION_GFX_HACKS,
                     SECTION_STEREOSCOPY));
@@ -175,6 +177,9 @@ public class Settings
 
         SettingsFile.saveFile(fileName, iniSections, view);
       }
+
+      // Notify the native code of the changes
+      NativeLibrary.ReloadConfig();
     }
     else
     {

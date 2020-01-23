@@ -4,13 +4,16 @@
 
 #include "Core/Core.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
-#include <locale>
 #include <mutex>
 #include <queue>
 #include <utility>
 #include <variant>
+
+#include <fmt/format.h>
+#include <fmt/time.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -24,7 +27,7 @@
 #include "Common/Event.h"
 #include "Common/FileUtil.h"
 #include "Common/Flag.h"
-#include "Common/Logging/LogManager.h"
+#include "Common/Logging/Log.h"
 #include "Common/MemoryUtil.h"
 #include "Common/MsgHandler.h"
 #include "Common/ScopeGuard.h"
@@ -70,6 +73,7 @@
 #include "Core/MemoryWatcher.h"
 #endif
 
+#include "InputCommon/ControlReference/ControlReference.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/GCAdapter.h"
 
@@ -92,6 +96,7 @@ static bool s_is_stopping = false;
 static bool s_hardware_initialized = false;
 static bool s_is_started = false;
 static Common::Flag s_is_booting;
+static Common::Event s_done_booting;
 static std::thread s_emu_thread;
 static StateChangedCallbackFunc s_on_state_changed_callback;
 
@@ -144,26 +149,23 @@ void OnFrameEnd()
 // Display messages and return values
 
 // Formatted stop message
-std::string StopMessage(bool main_thread, const std::string& message)
+std::string StopMessage(bool main_thread, std::string_view message)
 {
-  return StringFromFormat("Stop [%s %i]\t%s", main_thread ? "Main Thread" : "Video Thread",
-                          Common::CurrentThreadId(), message.c_str());
+  return fmt::format("Stop [{} {}]\t{}", main_thread ? "Main Thread" : "Video Thread",
+                     Common::CurrentThreadId(), message);
 }
 
-void DisplayMessage(const std::string& message, int time_in_ms)
+void DisplayMessage(std::string message, int time_in_ms)
 {
   if (!IsRunning())
     return;
 
   // Actually displaying non-ASCII could cause things to go pear-shaped
-  for (const char& c : message)
-  {
-    if (!std::isprint(c, std::locale::classic()))
-      return;
-  }
+  if (!std::all_of(message.begin(), message.end(), IsPrintableCharacter))
+    return;
 
-  OSD::AddMessage(message, time_in_ms);
   Host_UpdateTitle(message);
+  OSD::AddMessage(std::move(message), time_in_ms);
 }
 
 bool IsRunning()
@@ -234,6 +236,8 @@ bool Init(std::unique_ptr<BootParameters> boot, const WindowSystemInfo& wsi)
   g_video_backend->PrepareWindow(wsi);
 
   // Start the emu thread
+  s_done_booting.Reset();
+  s_is_booting.Set();
   s_emu_thread = std::thread(EmuThread, std::move(boot), wsi);
   return true;
 }
@@ -283,12 +287,6 @@ void Stop()  // - Hammertime!
 
     g_video_backend->Video_ExitLoop();
   }
-
-  ResetRumble();
-
-#ifdef USE_MEMORYWATCHER
-  s_memory_watcher.reset();
-#endif
 }
 
 void DeclareAsCPUThread()
@@ -365,6 +363,10 @@ static void CpuThread(const std::optional<std::string>& savestate_path, bool del
   // Enter CPU run loop. When we leave it - we are done.
   CPU::Run();
 
+#ifdef USE_MEMORYWATCHER
+  s_memory_watcher.reset();
+#endif
+
   s_is_started = false;
 
   if (_CoreParameter.bFastmem)
@@ -410,11 +412,11 @@ static void FifoPlayerThread(const std::optional<std::string>& savestate_path,
 static void EmuThread(std::unique_ptr<BootParameters> boot, WindowSystemInfo wsi)
 {
   const SConfig& core_parameter = SConfig::GetInstance();
-  s_is_booting.Set();
   if (s_on_state_changed_callback)
     s_on_state_changed_callback(State::Starting);
   Common::ScopeGuard flag_guard{[] {
     s_is_booting.Clear();
+    s_done_booting.Set();
     s_is_started = false;
     s_is_stopping = false;
     s_wants_determinism = false;
@@ -524,7 +526,12 @@ static void EmuThread(std::unique_ptr<BootParameters> boot, WindowSystemInfo wsi
       return;
 
     if (init_wiimotes)
+    {
+      Wiimote::ResetAllWiimotes();
       Wiimote::Shutdown();
+    }
+
+    ResetRumble();
 
     Keyboard::Shutdown();
     Pad::Shutdown();
@@ -537,6 +544,7 @@ static void EmuThread(std::unique_ptr<BootParameters> boot, WindowSystemInfo wsi
   // The hardware is initialized.
   s_hardware_initialized = true;
   s_is_booting.Clear();
+  s_done_booting.Set();
 
   // Set execution state to known values (CPU/FIFO/Audio Paused)
   CPU::Break();
@@ -660,6 +668,12 @@ State GetState()
   return State::Uninitialized;
 }
 
+void WaitUntilDoneBooting()
+{
+  if (s_is_booting.IsSet() || !s_hardware_initialized)
+    s_done_booting.Wait();
+}
+
 static std::string GenerateScreenshotFolderPath()
 {
   const std::string& gameId = SConfig::GetInstance().GetGameID();
@@ -676,15 +690,20 @@ static std::string GenerateScreenshotFolderPath()
 
 static std::string GenerateScreenshotName()
 {
-  std::string path = GenerateScreenshotFolderPath();
-
   // append gameId, path only contains the folder here.
-  path += SConfig::GetInstance().GetGameID();
+  const std::string path_prefix =
+      GenerateScreenshotFolderPath() + SConfig::GetInstance().GetGameID();
 
-  std::string name;
-  for (int i = 1; File::Exists(name = StringFromFormat("%s-%d.png", path.c_str(), i)); ++i)
+  const std::time_t cur_time = std::time(nullptr);
+  const std::string base_name =
+      fmt::format("{}_{:%Y-%m-%d_%H-%M-%S}", path_prefix, *std::localtime(&cur_time));
+
+  // First try a filename without any suffixes, if already exists then append increasing numbers
+  std::string name = fmt::format("{}.png", base_name);
+  if (File::Exists(name))
   {
-    // TODO?
+    for (u32 i = 1; File::Exists(name = fmt::format("{}_{}.png", base_name, i)); ++i)
+      ;
   }
 
   return name;
@@ -702,15 +721,14 @@ void SaveScreenShot(bool wait_for_completion)
     SetState(State::Running);
 }
 
-void SaveScreenShot(const std::string& name, bool wait_for_completion)
+void SaveScreenShot(std::string_view name, bool wait_for_completion)
 {
   const bool bPaused = GetState() == State::Paused;
 
   SetState(State::Paused);
 
-  std::string filePath = GenerateScreenshotFolderPath() + name + ".png";
-
-  g_renderer->SaveScreenshot(filePath, wait_for_completion);
+  g_renderer->SaveScreenshot(fmt::format("{}{}.png", GenerateScreenshotFolderPath(), name),
+                             wait_for_completion);
 
   if (!bPaused)
     SetState(State::Running);
@@ -839,9 +857,12 @@ void Callback_VideoCopiedToXFB(bool video_update)
 {
   if (video_update)
     s_drawn_frame++;
+}
 
+// Called at field boundaries in `VideoInterface::Update()`
+void FrameUpdate()
+{
   Movie::FrameUpdate();
-
   if (s_frame_step)
   {
     s_frame_step = false;
@@ -866,23 +887,25 @@ void UpdateTitle()
                         (VideoInterface::GetTargetRefreshRate() * ElapseTime));
 
   // Settings are shown the same for both extended and summary info
-  std::string SSettings = StringFromFormat(
-      "%s %s | %s | %s", PowerPC::GetCPUName(), _CoreParameter.bCPUThread ? "DC" : "SC",
-      g_video_backend->GetDisplayName().c_str(), _CoreParameter.bDSPHLE ? "HLE" : "LLE");
+  const std::string SSettings =
+      fmt::format("{} {} | {} | {}", PowerPC::GetCPUName(), _CoreParameter.bCPUThread ? "DC" : "SC",
+                  g_video_backend->GetDisplayName(), _CoreParameter.bDSPHLE ? "HLE" : "LLE");
 
   std::string SFPS;
-
   if (Movie::IsPlayingInput())
-    SFPS = StringFromFormat("Input: %u/%u - VI: %u - FPS: %.0f - VPS: %.0f - %.0f%%",
-                            (u32)Movie::GetCurrentInputCount(), (u32)Movie::GetTotalInputCount(),
-                            (u32)Movie::GetCurrentFrame(), FPS, VPS, Speed);
+  {
+    SFPS = fmt::format("Input: {}/{} - VI: {} - FPS: {:.0f} - VPS: {:.0f} - {:.0f}%",
+                       Movie::GetCurrentInputCount(), Movie::GetTotalInputCount(),
+                       Movie::GetCurrentFrame(), FPS, VPS, Speed);
+  }
   else if (Movie::IsRecordingInput())
-    SFPS = StringFromFormat("Input: %u - VI: %u - FPS: %.0f - VPS: %.0f - %.0f%%",
-                            (u32)Movie::GetCurrentInputCount(), (u32)Movie::GetCurrentFrame(), FPS,
-                            VPS, Speed);
+  {
+    SFPS = fmt::format("Input: {} - VI: {} - FPS: {:.0f} - VPS: {:.0f} - {:.0f}%",
+                       Movie::GetCurrentInputCount(), Movie::GetCurrentFrame(), FPS, VPS, Speed);
+  }
   else
   {
-    SFPS = StringFromFormat("FPS: %.0f - VPS: %.0f - %.0f%%", FPS, VPS, Speed);
+    SFPS = fmt::format("FPS: {:.0f} - VPS: {:.0f} - {:.0f}%", FPS, VPS, Speed);
     if (SConfig::GetInstance().m_InterfaceExtendedFPSInfo)
     {
       // Use extended or summary information. The summary information does not print the ticks data,
@@ -902,14 +925,13 @@ void UpdateTitle()
       float TicksPercentage =
           (float)diff / (float)(SystemTimers::GetTicksPerSecond() / 1000000) * 100;
 
-      SFPS += StringFromFormat(" | CPU: ~%i MHz [Real: %i + IdleSkip: %i] / %i MHz (~%3.0f%%)",
-                               (int)(diff), (int)(diff - idleDiff), (int)(idleDiff),
-                               SystemTimers::GetTicksPerSecond() / 1000000, TicksPercentage);
+      SFPS += fmt::format(" | CPU: ~{} MHz [Real: {} + IdleSkip: {}] / {} MHz (~{:3.0f}%)", diff,
+                          diff - idleDiff, idleDiff, SystemTimers::GetTicksPerSecond() / 1000000,
+                          TicksPercentage);
     }
   }
 
-  std::string message = StringFromFormat("%s | %s | %s", Common::scm_rev_str.c_str(),
-                                         SSettings.c_str(), SFPS.c_str());
+  std::string message = fmt::format("{} | {} | {}", Common::scm_rev_str, SSettings, SFPS);
   if (SConfig::GetInstance().m_show_active_title)
   {
     const std::string& title = SConfig::GetInstance().GetTitleDescription();
@@ -1026,6 +1048,13 @@ void DoFrameStep()
     // if not paused yet, pause immediately instead
     SetState(State::Paused);
   }
+}
+
+void UpdateInputGate()
+{
+  ControlReference::SetInputGate(
+      (SConfig::GetInstance().m_BackgroundInput || Host_RendererHasFocus()) &&
+      !Host_UIBlocksControllerState());
 }
 
 }  // namespace Core

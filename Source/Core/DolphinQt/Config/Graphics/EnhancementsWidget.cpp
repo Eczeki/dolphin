@@ -20,6 +20,7 @@
 #include "DolphinQt/Config/Graphics/GraphicsSlider.h"
 #include "DolphinQt/Config/Graphics/GraphicsWindow.h"
 #include "DolphinQt/Config/Graphics/PostProcessingConfigWindow.h"
+#include "DolphinQt/QtUtils/ModalMessageBox.h"
 #include "DolphinQt/Settings.h"
 
 #include "UICommon/VideoUtils.h"
@@ -189,7 +190,7 @@ void EnhancementsWidget::LoadPPShaders()
   m_pp_effect->setEnabled(supports_postprocessing);
 
   m_pp_effect->setToolTip(supports_postprocessing ?
-                              QStringLiteral("") :
+                              QString{} :
                               tr("%1 doesn't support this feature.")
                                   .arg(tr(g_video_backend->GetDisplayName().c_str())));
 
@@ -225,17 +226,7 @@ void EnhancementsWidget::LoadSettings()
   LoadPPShaders();
 
   // Stereoscopy
-  bool supports_stereoscopy = g_Config.backend_info.bSupportsGeometryShaders;
-  bool supports_3dvision = g_Config.backend_info.bSupports3DVision;
-
-  bool has_3dvision = m_3d_mode->count() == 7;
-
-  if (has_3dvision && !supports_3dvision)
-    m_3d_mode->removeItem(5);
-
-  if (!has_3dvision && supports_3dvision)
-    m_3d_mode->addItem(tr("NVIDIA 3D Vision"));
-
+  const bool supports_stereoscopy = g_Config.backend_info.bSupportsGeometryShaders;
   m_3d_mode->setEnabled(supports_stereoscopy);
   m_3d_convergence->setEnabled(supports_stereoscopy);
   m_3d_depth->setEnabled(supports_stereoscopy);

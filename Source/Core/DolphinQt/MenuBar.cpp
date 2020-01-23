@@ -57,6 +57,13 @@
 
 QPointer<MenuBar> MenuBar::s_menu_bar;
 
+QString MenuBar::GetSignatureSelector() const
+{
+  return QStringLiteral("%1 (*.dsy);; %2 (*.csv);; %3 (*.mega)")
+      .arg(tr("Dolphin Signature File"), tr("Dolphin Signature CSV File"),
+           tr("WiiTools Signature MEGA File"));
+}
+
 MenuBar::MenuBar(QWidget* parent) : QMenuBar(parent)
 {
   s_menu_bar = this;
@@ -114,7 +121,8 @@ void MenuBar::OnEmulationStateChanged(Core::State state)
     m_recording_stop->setEnabled(false);
     m_recording_export->setEnabled(false);
   }
-  m_recording_play->setEnabled(!running);
+  m_recording_play->setEnabled(m_game_selected && !running);
+  m_recording_start->setEnabled((m_game_selected || running) && !Movie::IsPlayingInput());
 
   // Options
   m_controllers_action->setEnabled(NetPlay::IsNetPlayRunning() ? !running : true);
@@ -192,7 +200,7 @@ void MenuBar::AddFileMenu()
 {
   QMenu* file_menu = addMenu(tr("&File"));
   m_open_action = file_menu->addAction(tr("&Open..."), this, &MenuBar::Open,
-                                       QKeySequence(QStringLiteral("Ctrl+O")));
+                                       QKeySequence(Qt::CTRL + Qt::Key_O));
 
   file_menu->addSeparator();
 
@@ -203,8 +211,8 @@ void MenuBar::AddFileMenu()
 
   file_menu->addSeparator();
 
-  m_exit_action = file_menu->addAction(tr("E&xit"), this, &MenuBar::Exit,
-                                       QKeySequence(QStringLiteral("Alt+F4")));
+  m_exit_action =
+      file_menu->addAction(tr("E&xit"), this, &MenuBar::Exit, QKeySequence(Qt::ALT + Qt::Key_F4));
 }
 
 void MenuBar::AddToolsMenu()
@@ -244,8 +252,7 @@ void MenuBar::AddToolsMenu()
   tools_menu->addSeparator();
 
   // Label will be set by a NANDRefresh later
-  m_boot_sysmenu =
-      tools_menu->addAction(QStringLiteral(""), this, [this] { emit BootWiiSystemMenu(); });
+  m_boot_sysmenu = tools_menu->addAction(QString{}, this, [this] { emit BootWiiSystemMenu(); });
   m_wad_install_action = tools_menu->addAction(tr("Install WAD..."), this, &MenuBar::InstallWAD);
   m_manage_nand_menu = tools_menu->addMenu(tr("Manage NAND"));
   m_import_backup = m_manage_nand_menu->addAction(tr("Import BootMii NAND Backup..."), this,
@@ -313,6 +320,9 @@ void MenuBar::AddEmulationMenu()
   AddStateSaveMenu(emu_menu);
   AddStateSlotMenu(emu_menu);
   UpdateStateSlotMenu();
+
+  for (QMenu* menu : {m_state_load_menu, m_state_save_menu, m_state_slot_menu})
+    connect(menu, &QMenu::aboutToShow, this, &MenuBar::UpdateStateSlotMenu);
 }
 
 void MenuBar::AddStateLoadMenu(QMenu* emu_menu)
@@ -325,7 +335,7 @@ void MenuBar::AddStateLoadMenu(QMenu* emu_menu)
 
   for (int i = 1; i <= 10; i++)
   {
-    QAction* action = m_state_load_slots_menu->addAction(QStringLiteral(""));
+    QAction* action = m_state_load_slots_menu->addAction(QString{});
 
     connect(action, &QAction::triggered, this, [=]() { emit StateLoadSlotAt(i); });
   }
@@ -342,7 +352,7 @@ void MenuBar::AddStateSaveMenu(QMenu* emu_menu)
 
   for (int i = 1; i <= 10; i++)
   {
-    QAction* action = m_state_save_slots_menu->addAction(QStringLiteral(""));
+    QAction* action = m_state_save_slots_menu->addAction(QString{});
 
     connect(action, &QAction::triggered, this, [=]() { emit StateSaveSlotAt(i); });
   }
@@ -355,7 +365,7 @@ void MenuBar::AddStateSlotMenu(QMenu* emu_menu)
 
   for (int i = 1; i <= 10; i++)
   {
-    QAction* action = m_state_slot_menu->addAction(QStringLiteral(""));
+    QAction* action = m_state_slot_menu->addAction(QString{});
     action->setCheckable(true);
     action->setActionGroup(m_state_slots);
     if (Settings::Instance().GetStateSlot() == i)
@@ -479,7 +489,7 @@ void MenuBar::AddViewMenu()
   view_menu->addAction(tr("Purge Game List Cache"), this, &MenuBar::PurgeGameListCache);
   view_menu->addSeparator();
   view_menu->addAction(tr("Search"), this, &MenuBar::ShowSearch,
-                       QKeySequence(QStringLiteral("Ctrl+F")));
+                       QKeySequence(Qt::CTRL + Qt::Key_F));
 }
 
 void MenuBar::AddOptionsMenu()
@@ -546,6 +556,11 @@ void MenuBar::AddHelpMenu()
   QAction* github = help_menu->addAction(tr("&GitHub Repository"));
   connect(github, &QAction::triggered, this, []() {
     QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/dolphin-emu/dolphin")));
+  });
+  QAction* bugtracker = help_menu->addAction(tr("&Bug Tracker"));
+  connect(bugtracker, &QAction::triggered, this, []() {
+    QDesktopServices::openUrl(
+        QUrl(QStringLiteral("https://bugs.dolphin-emu.org/projects/emulator")));
   });
 
   if (AutoUpdateChecker::SystemSupportsAutoUpdates())
@@ -939,7 +954,7 @@ void MenuBar::UpdateToolsMenu(bool emulation_started)
     const QString sysmenu_version =
         tmd.IsValid() ?
             QString::fromStdString(DiscIO::GetSysMenuVersionString(tmd.GetTitleVersion())) :
-            QStringLiteral("");
+            QString{};
     m_boot_sysmenu->setText(tr("Load Wii System Menu %1").arg(sysmenu_version));
 
     m_boot_sysmenu->setEnabled(tmd.IsValid());
@@ -1102,15 +1117,15 @@ void MenuBar::NANDExtractCertificates()
 
 void MenuBar::OnSelectionChanged(std::shared_ptr<const UICommon::GameFile> game_file)
 {
-  const bool game_selected = !!game_file;
+  m_game_selected = !!game_file;
 
-  m_recording_play->setEnabled(game_selected && !Core::IsRunning());
-  m_recording_start->setEnabled(game_selected && !Movie::IsPlayingInput());
+  m_recording_play->setEnabled(m_game_selected && !Core::IsRunning());
+  m_recording_start->setEnabled((m_game_selected || Core::IsRunning()) && !Movie::IsPlayingInput());
 }
 
 void MenuBar::OnRecordingStatusChanged(bool recording)
 {
-  m_recording_start->setEnabled(!recording);
+  m_recording_start->setEnabled(!recording && (m_game_selected || Core::IsRunning()));
   m_recording_stop->setEnabled(recording);
   m_recording_export->setEnabled(recording);
 }
@@ -1322,8 +1337,8 @@ void MenuBar::CreateSignatureFile()
   const QString text = QInputDialog::getText(
       this, tr("Input"), tr("Only export symbols with prefix:\n(Blank for all symbols)"));
 
-  const QString file = QFileDialog::getSaveFileName(
-      this, tr("Save signature file"), QDir::homePath(), tr("Function signature file (*.dsy)"));
+  const QString file = QFileDialog::getSaveFileName(this, tr("Save signature file"),
+                                                    QDir::homePath(), GetSignatureSelector());
   if (file.isEmpty())
     return;
 
@@ -1346,8 +1361,8 @@ void MenuBar::AppendSignatureFile()
   const QString text = QInputDialog::getText(
       this, tr("Input"), tr("Only append symbols with prefix:\n(Blank for all symbols)"));
 
-  const QString file = QFileDialog::getSaveFileName(
-      this, tr("Append signature to"), QDir::homePath(), tr("Function signature file (*.dsy)"));
+  const QString file = QFileDialog::getSaveFileName(this, tr("Append signature to"),
+                                                    QDir::homePath(), GetSignatureSelector());
   if (file.isEmpty())
     return;
 
@@ -1369,8 +1384,8 @@ void MenuBar::AppendSignatureFile()
 
 void MenuBar::ApplySignatureFile()
 {
-  const QString file = QFileDialog::getOpenFileName(
-      this, tr("Apply signature file"), QDir::homePath(), tr("Function signature file (*.dsy)"));
+  const QString file = QFileDialog::getOpenFileName(this, tr("Apply signature file"),
+                                                    QDir::homePath(), GetSignatureSelector());
 
   if (file.isEmpty())
     return;
@@ -1386,21 +1401,18 @@ void MenuBar::ApplySignatureFile()
 
 void MenuBar::CombineSignatureFiles()
 {
-  const QString priorityFile =
-      QFileDialog::getOpenFileName(this, tr("Choose priority input file"), QDir::homePath(),
-                                   tr("Function signature file (*.dsy)"));
+  const QString priorityFile = QFileDialog::getOpenFileName(
+      this, tr("Choose priority input file"), QDir::homePath(), GetSignatureSelector());
   if (priorityFile.isEmpty())
     return;
 
-  const QString secondaryFile =
-      QFileDialog::getOpenFileName(this, tr("Choose secondary input file"), QDir::homePath(),
-                                   tr("Function signature file (*.dsy)"));
+  const QString secondaryFile = QFileDialog::getOpenFileName(
+      this, tr("Choose secondary input file"), QDir::homePath(), GetSignatureSelector());
   if (secondaryFile.isEmpty())
     return;
 
-  const QString saveFile =
-      QFileDialog::getSaveFileName(this, tr("Save combined output file as"), QDir::homePath(),
-                                   tr("Function signature file (*.dsy)"));
+  const QString saveFile = QFileDialog::getSaveFileName(this, tr("Save combined output file as"),
+                                                        QDir::homePath(), GetSignatureSelector());
   if (saveFile.isEmpty())
     return;
 
@@ -1438,8 +1450,8 @@ void MenuBar::LogInstructions()
 void MenuBar::SearchInstruction()
 {
   bool good;
-  QString op = QInputDialog::getText(this, tr("Search instruction"), tr("Instruction:"),
-                                     QLineEdit::Normal, QStringLiteral(""), &good);
+  const QString op = QInputDialog::getText(this, tr("Search instruction"), tr("Instruction:"),
+                                           QLineEdit::Normal, QString{}, &good);
 
   if (!good)
     return;

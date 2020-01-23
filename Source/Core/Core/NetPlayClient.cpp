@@ -15,6 +15,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <fmt/format.h>
 #include <lzo/lzo1x.h>
 #include <mbedtls/md5.h>
 
@@ -305,6 +306,8 @@ unsigned int NetPlayClient::OnData(sf::Packet& packet)
       m_players[player.pid] = player;
     }
 
+    m_dialog->OnPlayerConnect(player.name);
+
     m_dialog->Update();
   }
   break;
@@ -314,10 +317,15 @@ unsigned int NetPlayClient::OnData(sf::Packet& packet)
     PlayerId pid;
     packet >> pid;
 
-    INFO_LOG(NETPLAY, "Player %s (%d) left", m_players.find(pid)->second.name.c_str(), pid);
-
     {
       std::lock_guard<std::recursive_mutex> lkp(m_crit.players);
+      const auto it = m_players.find(pid);
+      if (it == m_players.end())
+        break;
+
+      const auto& player = it->second;
+      INFO_LOG(NETPLAY, "Player %s (%d) left", player.name.c_str(), pid);
+      m_dialog->OnPlayerDisconnect(player.name);
       m_players.erase(m_players.find(pid));
     }
 
@@ -624,7 +632,7 @@ unsigned int NetPlayClient::OnData(sf::Packet& packet)
 
       packet >> m_net_settings.m_EnableCheats;
       packet >> m_net_settings.m_SelectedLanguage;
-      packet >> m_net_settings.m_OverrideGCLanguage;
+      packet >> m_net_settings.m_OverrideRegionSettings;
       packet >> m_net_settings.m_ProgressiveScan;
       packet >> m_net_settings.m_PAL60;
       packet >> m_net_settings.m_DSPEnableJIT;
@@ -633,7 +641,6 @@ unsigned int NetPlayClient::OnData(sf::Packet& packet)
       packet >> m_net_settings.m_CopyWiiSave;
       packet >> m_net_settings.m_OCEnable;
       packet >> m_net_settings.m_OCFactor;
-      packet >> m_net_settings.m_ReducePollingRate;
 
       for (auto& device : m_net_settings.m_EXIDevice)
       {
@@ -843,7 +850,7 @@ unsigned int NetPlayClient::OnData(sf::Packet& packet)
       packet >> is_slot_a >> file_count;
 
       const std::string path = File::GetUserPath(D_GCUSER_IDX) + GC_MEMCARD_NETPLAY DIR_SEP +
-                               StringFromFormat("Card %c", is_slot_a ? 'A' : 'B');
+                               fmt::format("Card {}", is_slot_a ? 'A' : 'B');
 
       if ((File::Exists(path) && !File::DeleteDirRecursively(path + DIR_SEP)) ||
           !File::CreateFullPath(path + DIR_SEP))
@@ -1229,9 +1236,8 @@ void NetPlayClient::DisplayPlayersPing()
   if (!g_ActiveConfig.bShowNetPlayPing)
     return;
 
-  OSD::AddTypedMessage(OSD::MessageType::NetPlayPing,
-                       StringFromFormat("Ping: %u", GetPlayersMaxPing()), OSD::Duration::SHORT,
-                       OSD::Color::CYAN);
+  OSD::AddTypedMessage(OSD::MessageType::NetPlayPing, fmt::format("Ping: {}", GetPlayersMaxPing()),
+                       OSD::Duration::SHORT, OSD::Color::CYAN);
 }
 
 u32 NetPlayClient::GetPlayersMaxPing() const
@@ -1587,8 +1593,8 @@ bool NetPlayClient::DecompressPacketIntoFile(sf::Packet& packet, const std::stri
 
   while (true)
   {
-    lzo_uint32 cur_len = 0;  // number of bytes to read
-    lzo_uint new_len = 0;    // number of bytes to write
+    u32 cur_len = 0;       // number of bytes to read
+    lzo_uint new_len = 0;  // number of bytes to write
 
     packet >> cur_len;
     if (!cur_len)
@@ -1630,8 +1636,8 @@ std::optional<std::vector<u8>> NetPlayClient::DecompressPacketIntoBuffer(sf::Pac
   lzo_uint i = 0;
   while (true)
   {
-    lzo_uint32 cur_len = 0;  // number of bytes to read
-    lzo_uint new_len = 0;    // number of bytes to write
+    u32 cur_len = 0;       // number of bytes to read
+    lzo_uint new_len = 0;  // number of bytes to write
 
     packet >> cur_len;
     if (!cur_len)
@@ -1920,15 +1926,15 @@ bool NetPlayClient::WiimoteUpdate(int _number, u8* data, const u8 size, u8 repor
     if (m_wiimote_map[_number] == m_local_player->pid)
     {
       nw.assign(data, data + size);
-      do
+
+      // TODO: add a seperate setting for wiimote buffer?
+      while (m_wiimote_buffer[_number].Size() <= m_target_buffer_size * 200 / 120)
       {
         // add to buffer
         m_wiimote_buffer[_number].Push(nw);
 
         SendWiimoteState(_number, nw);
-      } while (m_wiimote_buffer[_number].Size() <=
-               m_target_buffer_size * 200 /
-                   120);  // TODO: add a seperate setting for wiimote buffer?
+      }
     }
 
   }  // unlock players

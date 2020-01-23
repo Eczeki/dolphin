@@ -33,8 +33,11 @@
 #include "DolphinQt/Config/Mapping/HotkeyTAS.h"
 #include "DolphinQt/Config/Mapping/HotkeyWii.h"
 #include "DolphinQt/Config/Mapping/WiimoteEmuExtension.h"
+#include "DolphinQt/Config/Mapping/WiimoteEmuExtensionMotionInput.h"
+#include "DolphinQt/Config/Mapping/WiimoteEmuExtensionMotionSimulation.h"
 #include "DolphinQt/Config/Mapping/WiimoteEmuGeneral.h"
 #include "DolphinQt/Config/Mapping/WiimoteEmuMotionControl.h"
+#include "DolphinQt/Config/Mapping/WiimoteEmuMotionControlIMU.h"
 #include "DolphinQt/QtUtils/ModalMessageBox.h"
 #include "DolphinQt/QtUtils/WrapInScrollArea.h"
 #include "DolphinQt/Settings.h"
@@ -308,8 +311,8 @@ void MappingWindow::OnGlobalDevicesChanged()
     {
       // Selected device is not currently attached.
       const auto qname = QString::fromStdString(default_device);
-      m_devices_combo->addItem(
-          QStringLiteral("[") + tr("disconnected") + QStringLiteral("] ") + qname, qname);
+      m_devices_combo->addItem(QLatin1Char{'['} + tr("disconnected") + QStringLiteral("] ") + qname,
+                               qname);
       m_devices_combo->setCurrentIndex(m_devices_combo->count() - 1);
     }
   }
@@ -339,17 +342,26 @@ void MappingWindow::SetMappingType(MappingWindow::Type type)
   case Type::MAPPING_GC_MICROPHONE:
     widget = new GCMicrophone(this);
     setWindowTitle(tr("GameCube Microphone Slot %1")
-                       .arg(GetPort() == 0 ? QStringLiteral("A") : QStringLiteral("B")));
+                       .arg(GetPort() == 0 ? QLatin1Char{'A'} : QLatin1Char{'B'}));
     AddWidget(tr("Microphone"), widget);
     break;
   case Type::MAPPING_WIIMOTE_EMU:
   {
     auto* extension = new WiimoteEmuExtension(this);
+    auto* extension_motion_input = new WiimoteEmuExtensionMotionInput(this);
+    auto* extension_motion_simulation = new WiimoteEmuExtensionMotionSimulation(this);
     widget = new WiimoteEmuGeneral(this, extension);
     setWindowTitle(tr("Wii Remote %1").arg(GetPort() + 1));
     AddWidget(tr("General and Options"), widget);
-    AddWidget(tr("Motion Controls"), new WiimoteEmuMotionControl(this));
+    AddWidget(tr("Motion Simulation"), new WiimoteEmuMotionControl(this));
+    AddWidget(tr("Motion Input"), new WiimoteEmuMotionControlIMU(this));
     AddWidget(tr("Extension"), extension);
+    m_extension_motion_simulation_tab =
+        AddWidget(EXTENSION_MOTION_SIMULATION_TAB_NAME, extension_motion_simulation);
+    m_extension_motion_input_tab =
+        AddWidget(EXTENSION_MOTION_INPUT_TAB_NAME, extension_motion_input);
+    // Hide tabs by default. "Nunchuk" selection triggers an event to show them.
+    ShowExtensionMotionTabs(false);
     break;
   }
   case Type::MAPPING_HOTKEYS:
@@ -393,9 +405,11 @@ void MappingWindow::SetMappingType(MappingWindow::Type type)
   m_profiles_combo->setCurrentIndex(-1);
 }
 
-void MappingWindow::AddWidget(const QString& name, QWidget* widget)
+QWidget* MappingWindow::AddWidget(const QString& name, QWidget* widget)
 {
-  m_tab_widget->addTab(GetWrappedWidget(widget, this, 150, 210), name);
+  QWidget* wrapper = GetWrappedWidget(widget, this, 150, 210);
+  m_tab_widget->addTab(wrapper, name);
+  return wrapper;
 }
 
 int MappingWindow::GetPort() const
@@ -429,4 +443,18 @@ void MappingWindow::OnClearFieldsPressed()
   m_controller->UpdateReferences(g_controller_interface);
   emit ConfigChanged();
   emit Save();
+}
+
+void MappingWindow::ShowExtensionMotionTabs(bool show)
+{
+  if (show)
+  {
+    m_tab_widget->addTab(m_extension_motion_simulation_tab, EXTENSION_MOTION_SIMULATION_TAB_NAME);
+    m_tab_widget->addTab(m_extension_motion_input_tab, EXTENSION_MOTION_INPUT_TAB_NAME);
+  }
+  else
+  {
+    m_tab_widget->removeTab(5);
+    m_tab_widget->removeTab(4);
+  }
 }

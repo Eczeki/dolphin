@@ -86,8 +86,8 @@ void ResourcePackManager::RepopulateTable()
   m_table_widget->clear();
   m_table_widget->setColumnCount(6);
 
-  m_table_widget->setHorizontalHeaderLabels({QStringLiteral(""), tr("Name"), tr("Version"),
-                                             tr("Description"), tr("Author"), tr("Website")});
+  m_table_widget->setHorizontalHeaderLabels(
+      {QString{}, tr("Name"), tr("Version"), tr("Description"), tr("Author"), tr("Website")});
 
   auto* header = m_table_widget->horizontalHeader();
 
@@ -142,7 +142,7 @@ void ResourcePackManager::RepopulateTable()
 
       if (ResourcePack::IsInstalled(pack))
       {
-        item->setBackgroundColor(QColor(Qt::green));
+        item->setBackground(QColor(Qt::green));
 
         auto font = item->font();
         font.setBold(true);
@@ -193,7 +193,7 @@ void ResourcePackManager::Install()
 
   auto& item = ResourcePack::GetPacks()[GetResourcePackIndex(items[0])];
 
-  bool success = item.Install(File::GetUserPath(D_USER_IDX));
+  bool success = item.Install(File::GetUserPath(D_LOAD_IDX));
 
   if (!success)
   {
@@ -214,7 +214,7 @@ void ResourcePackManager::Uninstall()
 
   auto& item = ResourcePack::GetPacks()[GetResourcePackIndex(items[0])];
 
-  bool success = item.Uninstall(File::GetUserPath(D_USER_IDX));
+  bool success = item.Uninstall(File::GetUserPath(D_LOAD_IDX));
 
   if (!success)
   {

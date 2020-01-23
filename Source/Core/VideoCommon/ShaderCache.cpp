@@ -70,6 +70,9 @@ void ShaderCache::Reload()
   ClosePipelineUIDCache();
   ClearCaches();
 
+  if (!CompileSharedPipelines())
+    PanicAlert("Failed to compile shared pipelines after reload.");
+
   if (g_ActiveConfig.bShaderCache)
     LoadCaches();
 
@@ -369,6 +372,23 @@ void ShaderCache::ClearCaches()
   ClearShaderCache(m_uber_vs_cache);
   ClearShaderCache(m_uber_ps_cache);
 
+  m_screen_quad_vertex_shader.reset();
+  m_texture_copy_vertex_shader.reset();
+  m_efb_copy_vertex_shader.reset();
+  m_texcoord_geometry_shader.reset();
+  m_color_geometry_shader.reset();
+  m_texture_copy_pixel_shader.reset();
+  m_color_pixel_shader.reset();
+
+  m_efb_copy_to_vram_pipelines.clear();
+  m_efb_copy_to_ram_pipelines.clear();
+  m_copy_rgba8_pipeline.reset();
+  m_rgba8_stereo_copy_pipeline.reset();
+  for (auto& pipeline : m_palette_conversion_pipelines)
+    pipeline.reset();
+  m_texture_reinterpret_pipelines.clear();
+  m_texture_decoding_shaders.clear();
+
   SETSTAT(g_stats.num_pixel_shaders_created, 0);
   SETSTAT(g_stats.num_pixel_shaders_alive, 0);
   SETSTAT(g_stats.num_vertex_shaders_created, 0);
@@ -558,6 +578,13 @@ AbstractPipelineConfig ShaderCache::GetGXPipelineConfig(
   config.depth_state = depth_state;
   config.blending_state = blending_state;
   config.framebuffer_state = g_framebuffer_manager->GetEFBFramebufferState();
+
+  if (config.blending_state.logicopenable && !g_ActiveConfig.backend_info.bSupportsLogicOp)
+  {
+    WARN_LOG(VIDEO, "Approximating logic op with blending, this will produce incorrect rendering.");
+    config.blending_state.ApproximateLogicOpWithBlending();
+  }
+
   return config;
 }
 
@@ -1161,10 +1188,7 @@ const AbstractPipeline* ShaderCache::GetEFBCopyToRAMPipeline(const EFBCopyParams
   }
 
   AbstractPipelineConfig config = {};
-  config.vertex_format = nullptr;
   config.vertex_shader = m_screen_quad_vertex_shader.get();
-  config.geometry_shader =
-      UseGeometryShaderForEFBCopies() ? m_texcoord_geometry_shader.get() : nullptr;
   config.pixel_shader = shader.get();
   config.rasterization_state = RenderState::GetNoCullRasterizationState(PrimitiveType::Triangles);
   config.depth_state = RenderState::GetNoDepthTestingDepthState();

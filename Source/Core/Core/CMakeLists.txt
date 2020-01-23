@@ -321,6 +321,8 @@ add_library(core
   IOS/Device.h
   IOS/DeviceStub.cpp
   IOS/DeviceStub.h
+  IOS/DolphinDevice.cpp
+  IOS/DolphinDevice.h
   IOS/IOS.cpp
   IOS/IOS.h
   IOS/IOSC.cpp

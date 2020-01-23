@@ -2,6 +2,8 @@
 // Licensed under GPLv2+
 // Refer to the license.txt file included.
 
+#include "VideoCommon/TextureCacheBase.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -13,6 +15,8 @@
 #include <pmmintrin.h>
 #endif
 
+#include <fmt/format.h>
+
 #include "Common/Align.h"
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
@@ -22,7 +26,6 @@
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
 #include "Common/MemoryUtil.h"
-#include "Common/StringUtil.h"
 
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/ConfigManager.h"
@@ -35,12 +38,12 @@
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/HiresTextures.h"
+#include "VideoCommon/OpcodeDecoding.h"
 #include "VideoCommon/PixelShaderManager.h"
 #include "VideoCommon/RenderBase.h"
 #include "VideoCommon/SamplerCommon.h"
 #include "VideoCommon/ShaderCache.h"
 #include "VideoCommon/Statistics.h"
-#include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/TextureConversionShader.h"
 #include "VideoCommon/TextureConverterShaderGen.h"
 #include "VideoCommon/TextureDecoder.h"
@@ -122,11 +125,8 @@ void TextureCacheBase::Invalidate()
 {
   FlushEFBCopies();
   InvalidateAllBindPoints();
-  for (size_t i = 0; i < bound_textures.size(); ++i)
-  {
-    bound_textures[i] = nullptr;
-  }
 
+  bound_textures.fill(nullptr);
   for (auto& tex : textures_by_address)
   {
     delete tex.second;
@@ -137,7 +137,7 @@ void TextureCacheBase::Invalidate()
   texture_pool.clear();
 }
 
-void TextureCacheBase::OnConfigChanged(VideoConfig& config)
+void TextureCacheBase::OnConfigChanged(const VideoConfig& config)
 {
   if (config.bHiresTextures != backup_config.hires_textures ||
       config.bCacheHiresTextures != backup_config.cache_hires_textures)
@@ -155,9 +155,7 @@ void TextureCacheBase::OnConfigChanged(VideoConfig& config)
       config.bArbitraryMipmapDetection != backup_config.arbitrary_mipmap_detection)
   {
     Invalidate();
-
-    TexDecoder_SetTexFmtOverlayOptions(g_ActiveConfig.bTexFmtOverlayEnable,
-                                       g_ActiveConfig.bTexFmtOverlayCenter);
+    TexDecoder_SetTexFmtOverlayOptions(config.bTexFmtOverlayEnable, config.bTexFmtOverlayCenter);
   }
 
   SetBackupConfig(config);
@@ -553,16 +551,16 @@ void TextureCacheBase::DoSaveState(PointerWrap& p)
     {
       if (ShouldSaveEntry(it.second))
       {
-        u32 id = AddCacheEntryToMap(it.second);
-        textures_by_address_list.push_back(std::make_pair(it.first, id));
+        const u32 id = AddCacheEntryToMap(it.second);
+        textures_by_address_list.emplace_back(it.first, id);
       }
     }
     for (const auto& it : textures_by_hash)
     {
       if (ShouldSaveEntry(it.second))
       {
-        u32 id = AddCacheEntryToMap(it.second);
-        textures_by_hash_list.push_back(std::make_pair(it.first, id));
+        const u32 id = AddCacheEntryToMap(it.second);
+        textures_by_hash_list.emplace_back(it.first, id);
       }
     }
   }
@@ -572,7 +570,7 @@ void TextureCacheBase::DoSaveState(PointerWrap& p)
   p.Do(size);
   for (TCacheEntry* entry : entries_to_save)
   {
-    g_texture_cache->SerializeTexture(entry->texture.get(), entry->texture->GetConfig(), p);
+    SerializeTexture(entry->texture.get(), entry->texture->GetConfig(), p);
     entry->DoState(p);
   }
   p.DoMarker("TextureCacheEntries");
@@ -652,9 +650,9 @@ void TextureCacheBase::DoLoadState(PointerWrap& p)
   {
     // Even if the texture isn't valid, we still need to create the cache entry object
     // to update the point in the state state. We'll just throw it away if it's invalid.
-    auto tex = g_texture_cache->DeserializeTexture(p);
+    auto tex = DeserializeTexture(p);
     TCacheEntry* entry = new TCacheEntry(std::move(tex->texture), std::move(tex->framebuffer));
-    entry->textures_by_hash_iter = g_texture_cache->textures_by_hash.end();
+    entry->textures_by_hash_iter = textures_by_hash.end();
     entry->DoState(p);
     if (entry->texture && commit_state)
       id_map.emplace(i, entry);
@@ -922,13 +920,14 @@ void TextureCacheBase::DumpTexture(TCacheEntry* entry, std::string basename, uns
 
   if (level > 0)
   {
-    basename += StringFromFormat("_mip%i", level);
+    basename += fmt::format("_mip{}", level);
   }
 
-  std::string filename = szDir + "/" + basename + ".png";
+  const std::string filename = fmt::format("{}/{}.png", szDir, basename);
+  if (File::Exists(filename))
+    return;
 
-  if (!File::Exists(filename))
-    entry->texture->Save(filename, level);
+  entry->texture->Save(filename, level);
 }
 
 static u32 CalculateLevelSize(u32 level_0_size, u32 level)
@@ -1262,9 +1261,11 @@ TextureCacheBase::GetTexture(u32 address, u32 width, u32 height, const TextureFo
 
   // If we are recording a FifoLog, keep track of what memory we read. FifoRecorder does
   // its own memory modification tracking independent of the texture hashing below.
-  if (g_bRecordFifoData && !from_tmem)
+  if (OpcodeDecoder::g_record_fifo_data && !from_tmem)
+  {
     FifoRecorder::GetInstance().UseMemory(address, texture_size + additional_mips_size,
                                           MemoryUpdate::TEXTURE_MAP);
+  }
 
   // TODO: This doesn't hash GB tiles for preloaded RGBA8 textures (instead, it's hashing more data
   // from the low tmem bank than it should)
@@ -1756,10 +1757,8 @@ TextureCacheBase::GetXFBTexture(u32 address, u32 width, u32 height, u32 stride,
   {
     // While this isn't really an xfb copy, we can treat it as such for dumping purposes
     static int xfb_count = 0;
-    entry->texture->Save(StringFromFormat("%sxfb_loaded_%i.png",
-                                          File::GetUserPath(D_DUMPTEXTURES_IDX).c_str(),
-                                          xfb_count++),
-                         0);
+    entry->texture->Save(
+        fmt::format("{}xfb_loaded_{}.png", File::GetUserPath(D_DUMPTEXTURES_IDX), xfb_count++), 0);
   }
 
   GetDisplayRectForXFBEntry(entry, width, height, display_rect);
@@ -2169,19 +2168,17 @@ void TextureCacheBase::CopyRenderTargetToTexture(
       if (g_ActiveConfig.bDumpEFBTarget && !is_xfb_copy)
       {
         static int efb_count = 0;
-        entry->texture->Save(StringFromFormat("%sefb_frame_%i.png",
-                                              File::GetUserPath(D_DUMPTEXTURES_IDX).c_str(),
-                                              efb_count++),
-                             0);
+        entry->texture->Save(
+            fmt::format("{}efb_frame_{}.png", File::GetUserPath(D_DUMPTEXTURES_IDX), efb_count++),
+            0);
       }
 
       if (g_ActiveConfig.bDumpXFBTarget && is_xfb_copy)
       {
         static int xfb_count = 0;
-        entry->texture->Save(StringFromFormat("%sxfb_copy_%i.png",
-                                              File::GetUserPath(D_DUMPTEXTURES_IDX).c_str(),
-                                              xfb_count++),
-                             0);
+        entry->texture->Save(
+            fmt::format("{}xfb_copy_{}.png", File::GetUserPath(D_DUMPTEXTURES_IDX), xfb_count++),
+            0);
       }
     }
   }
@@ -2300,7 +2297,7 @@ void TextureCacheBase::CopyRenderTargetToTexture(
     ++iter.first;
   }
 
-  if (g_bRecordFifoData)
+  if (OpcodeDecoder::g_record_fifo_data)
   {
     // Mark the memory behind this efb copy as dynamicly generated for the Fifo log
     u32 address = dstAddr;

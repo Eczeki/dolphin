@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
-#include <locale>
 #include <map>
 #include <memory>
 #include <optional>
@@ -156,6 +155,9 @@ bool VolumeWAD::CheckContentIntegrity(const IOS::ES::Content& content,
                                       const std::vector<u8>& encrypted_data,
                                       const IOS::ES::TicketReader& ticket) const
 {
+  if (encrypted_data.size() != Common::AlignUp(content.size, 0x40))
+    return false;
+
   mbedtls_aes_context context;
   const std::array<u8, 16> key = ticket.GetTitleKey();
   mbedtls_aes_setkey_dec(&context, key.data(), 128);
@@ -258,8 +260,7 @@ std::string VolumeWAD::GetMakerID(const Partition& partition) const
     return "00";
 
   // Some weird channels use 0x0000 in place of the MakerID, so we need a check here
-  const std::locale& c_locale = std::locale::classic();
-  if (!std::isprint(temp[0], c_locale) || !std::isprint(temp[1], c_locale))
+  if (!IsPrintableCharacter(temp[0]) || !IsPrintableCharacter(temp[1]))
     return "00";
 
   return DecodeString(temp);
